@@ -1,0 +1,1133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CHART QUEST</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0f380f; overflow: hidden; }
+  #game { width: 100vw; height: 100vh; }
+  canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+</head>
+<body>
+<div id="game"></div>
+<script>
+'use strict';
+/* =====================================================================
+ * CHART QUEST — a Game Boy-style technical analysis battle prototype
+ * Phaser 3, no build step. Everything (sprites, data, sfx) is generated
+ * or embedded below; the only network request is the Phaser CDN script.
+ * ===================================================================== */
+
+/* ---------- Constants & palette (classic DMG greens) ---------- */
+const W = 480, H = 432;                 // 3x the Game Boy's 160x144
+const C   = { darkest: 0x0f380f, dark: 0x306230, light: 0x8bac0f, lightest: 0x9bbc0f };
+const CSS = { darkest: '#0f380f', dark: '#306230', light: '#8bac0f', lightest: '#9bbc0f' };
+const FONT = '"Courier New", Courier, monospace';
+const CHUNK = 4;                        // candles revealed per attack ("what happened next")
+
+/* ---------- Embedded datasets ----------
+ * Each pattern: metadata + `candles` (the visible pattern) + `future`
+ * (the real continuation that is revealed CHUNK candles per attack).
+ * Candle tuple format: [open, high, low, close, volume]
+ */
+const PATTERNS = [
+  {
+    "id":"hs","name":"HEAD & SHOULDERS","ticker":"UNCO","bias":"down","lv":12,"hp":100,"desc":"Bearish reversal. Left shoulder, higher head, lower right shoulder. Watch the NECKLINE.","enemyMoves":["FAKE BOUNCE","BULL TRAP","STOP HUNT"],"line":{"a":[10,104.5],"b":[21,104],"label":"NECKLINE"},
+    candles: [
+      [99.59,100.35,99.19,100,906],
+      [99.86,102.1,99.5,101.46,1651],
+      [101.45,104.28,100.86,103.52,2001],
+      [103.46,106.87,103.26,106.52,2088],
+      [106.67,108.54,106.44,108.22,1750],
+      [108.16,110.15,107.58,110.02,2055],
+      [110.04,112.68,109.48,112,2095],
+      [111.87,112.34,109.47,110.02,2029],
+      [110.18,110.87,107.7,108.21,2125],
+      [108.38,108.86,105.42,106.09,1684],
+      [106.09,106.42,103.89,104.5,1719],
+      [104.59,107.93,104.1,107.14,2286],
+      [107.12,110.47,106.5,109.92,2228],
+      [109.85,112.25,109.75,111.98,1629],
+      [112.14,115.14,111.6,114.45,1701],
+      [114.5,118.22,113.89,117.71,2665],
+      [117.63,120.79,117.07,120,2199],
+      [120.04,120.72,116.62,116.82,2670],
+      [116.82,117.32,113.05,113.27,2451],
+      [113.17,113.84,109.55,110.25,2384],
+      [110.31,111.1,106.45,106.97,2564],
+      [107.13,107.57,103.74,104,2386],
+      [104.1,106.74,103.87,106.04,1866],
+      [106.03,108.24,105.8,107.78,1604],
+      [107.75,110.96,107.54,110.53,1886],
+      [110.41,112.12,110.24,112,1913],
+      [112.17,112.31,110.13,110.35,1728],
+      [110.35,110.96,109.31,109.67,1222],
+      [109.77,110.37,106.87,107.53,1976],
+      [107.64,108.03,106.01,106.5,1374]
+    ],
+    future: [
+      [106.51,107.15,104.58,104.73,1617],
+      [104.85,105.53,102.73,103.37,1598],
+      [103.32,104.06,101.87,102.15,1430],
+      [102.14,102.82,100.62,101,1782],
+      [101.02,101.42,99.34,99.68,1605],
+      [99.61,100.32,98.04,98.54,1760],
+      [98.66,99.1,96,96.41,2084],
+      [96.56,97.04,94.94,95.5,1262],
+      [95.57,97.58,95.04,97.2,1921],
+      [97.16,98.37,97,98.06,1506],
+      [98.14,100.16,97.82,99.38,1398],
+      [99.23,101.1,98.48,100.5,1723],
+      [100.62,101.39,98.56,98.82,2060],
+      [98.75,99.22,96.89,97.26,1772],
+      [97.35,97.89,94.4,95.01,2076],
+      [95.04,95.34,92.32,93,1868],
+      [92.87,93.48,91.79,92.21,1333],
+      [92.23,92.95,90.09,90.86,1388],
+      [90.72,91.02,88.28,88.74,1786],
+      [88.89,89.59,87.53,88,1638]
+    ]
+  },
+  {
+    "id":"flag","name":"BULL FLAG","ticker":"MOON","bias":"up","lv":9,"hp":100,"desc":"Bullish continuation. A steep pole up, then a tight flag drifting down on fading volume.","enemyMoves":["BEAR TRAP","SHAKEOUT","CHOP ZONE"],"line":{"a":[13,125.5],"b":[27,122.5],"label":"FLAG TOP"},
+    candles: [
+      [99.85,100.51,99.22,100,972],
+      [100.13,100.87,99.47,100.13,1105],
+      [100,100.77,99.85,100.34,926],
+      [100.42,100.79,99.71,100.36,913],
+      [100.26,101.23,99.57,100.67,913],
+      [100.5,101.18,100.26,101,1289],
+      [101.09,104.27,100.31,103.97,2061],
+      [104.11,108.21,103.84,107.43,2260],
+      [107.26,110.57,106.63,110.41,2535],
+      [110.48,113.22,110.16,112.83,1840],
+      [112.82,116.59,112.55,115.94,2257],
+      [115.82,119.79,115.44,119.3,2216],
+      [119.32,122.39,118.97,121.66,1949],
+      [121.74,125.34,121.5,125,2508],
+      [125.12,125.62,123.07,123.82,1540],
+      [123.67,124.24,123.02,123.12,1356],
+      [122.96,123.55,121.27,121.82,1357],
+      [121.83,122.52,120.74,121,1423],
+      [120.98,121.82,120.44,121.39,1438],
+      [121.22,123.74,120.84,123.12,1964],
+      [123.16,124.16,122.65,123.5,1255],
+      [123.62,124.04,121.48,122.18,1571],
+      [122.02,122.26,121.29,121.56,1307],
+      [121.41,122.02,120.47,120.86,1530],
+      [120.78,121.31,119.1,119.5,1324],
+      [119.44,120.17,119.19,119.67,1074],
+      [119.52,121.05,118.81,120.82,1852],
+      [120.86,122.23,120.45,121.5,1305],
+      [121.43,121.81,119.75,119.95,1516],
+      [120.01,120.45,118.47,119,1171]
+    ],
+    future: [
+      [119.11,121.52,118.71,120.93,1983],
+      [120.97,123.35,120.3,122.71,1614],
+      [122.66,124.66,122.02,124.18,1888],
+      [124.08,127.01,123.47,126.5,2130],
+      [126.57,128.37,125.96,128.06,1808],
+      [127.95,130.12,127.23,129.58,1824],
+      [129.68,131.51,128.91,131.06,1644],
+      [130.93,132.63,130.22,132,1276],
+      [132.15,132.36,130.63,131.16,1476],
+      [131.28,131.78,129.6,130.1,1292],
+      [130.22,130.56,128.19,128.65,1921],
+      [128.76,129.26,127.59,128,1366],
+      [128.05,130.01,127.57,129.82,1928],
+      [129.92,132.44,129.27,131.87,1904],
+      [131.75,134.22,131.53,133.79,1837],
+      [133.76,136.26,133.09,136,2036],
+      [136.02,137.79,135.85,137.52,1894],
+      [137.57,139.17,136.85,138.67,1468],
+      [138.63,140.32,138.47,140,1817],
+      [140.05,141.92,139.86,141.5,1340]
+    ]
+  },
+  {
+    "id":"dbl","name":"DOUBLE BOTTOM","ticker":"DUBB","bias":"up","lv":15,"hp":100,"desc":"Bullish reversal. Two equal lows form a W. A close over the NECKLINE confirms.","enemyMoves":["LOWER LOW","FUD WAVE","WICK SLAP"],"line":{"a":[15,110],"b":[29,110],"label":"NECKLINE"},
+    candles: [
+      [120.72,121.19,120.34,121,976],
+      [121.01,121.69,119.6,119.81,1772],
+      [119.94,120.68,118.24,118.76,1748],
+      [118.72,119.02,117.22,117.38,1507],
+      [117.23,117.78,115.55,116,1403],
+      [115.97,116.62,111.65,112.27,2801],
+      [112.36,113,108.86,109.54,2500],
+      [109.39,109.88,106.14,106.75,2420],
+      [106.88,107.04,102.81,102.94,2387],
+      [103.04,103.73,99.41,100,2444],
+      [99.95,102.87,99.27,102.1,2217],
+      [102,104.75,101.86,104.32,2010],
+      [104.31,106.69,103.94,106,1736],
+      [106.13,107.95,105.74,107.84,1735],
+      [107.68,108.99,107.05,108.47,1623],
+      [108.63,110.28,108.35,110,1807],
+      [110.12,110.36,108.07,108.84,1662],
+      [108.88,109.57,106.55,106.7,1743],
+      [106.74,106.85,105.62,105.85,1660],
+      [106.03,106.23,103.8,104,1773],
+      [104.11,104.46,103.03,103.22,1362],
+      [103.31,104.02,101.45,101.81,1929],
+      [101.74,102.32,99.96,100.5,1475],
+      [100.48,102.07,100.2,101.7,1360],
+      [101.86,102.94,101.59,102.34,956],
+      [102.31,103.81,101.56,103.41,1374],
+      [103.27,105.5,102.99,105,1813],
+      [105.12,106.28,105,105.92,1644],
+      [105.92,108.48,105.69,107.71,1521],
+      [107.83,108.73,107.04,108.5,1004]
+    ],
+    future: [
+      [108.52,110.07,108.37,109.33,1303],
+      [109.35,111.23,108.86,111,1627],
+      [111.09,112.6,110.78,111.94,1656],
+      [111.81,113.21,111.28,113,1429],
+      [113.06,113.86,112.2,112.31,1099],
+      [112.45,112.73,110.97,111.63,1070],
+      [111.67,112.02,110.67,111.12,1248],
+      [111.22,111.67,109.8,110,1639],
+      [109.88,112.15,109.39,111.69,1906],
+      [111.71,113.42,111.07,112.91,1363],
+      [112.9,114.94,112.31,114.7,2002],
+      [114.67,116.68,114.25,116,1471],
+      [116.07,117.83,115.62,117.66,1578],
+      [117.7,119.45,117.49,118.72,1298],
+      [118.67,119.99,118.06,119.59,1424],
+      [119.67,121.75,119.34,121,1639],
+      [120.98,121.31,120.7,120.94,1107],
+      [120.85,121.2,119.76,120.38,1072],
+      [120.25,120.71,118.86,119.55,1156],
+      [119.56,119.82,118.84,119,1312]
+    ]
+  },
+  {
+    "id":"wedge","name":"RISING WEDGE","ticker":"WDGE","bias":"down","lv":18,"hp":100,"desc":"Bearish. Higher highs and higher lows squeeze together as the rally runs out of gas.","enemyMoves":["FOMO PUMP","SHORT SQUEEZE","GAP FILL"],"line":{"a":[8,102],"b":[24,108.5],"label":"SUPPORT"},
+    candles: [
+      [99.58,100.21,98.9,100,1107],
+      [99.87,101.85,99.63,101.5,1858],
+      [101.56,103.65,100.9,103.16,1922],
+      [103.07,104.98,102.77,104.73,1808],
+      [104.69,106.1,104.18,106,1405],
+      [105.94,106.34,103.7,104.46,1575],
+      [104.43,104.79,104.09,104.4,1311],
+      [104.33,104.76,102.65,102.99,1706],
+      [102.9,103.63,101.55,102,1577],
+      [102.14,104.45,101.69,103.71,1671],
+      [103.65,106.06,103.11,105.94,2105],
+      [105.88,108.01,105.29,107.57,1622],
+      [107.66,109.32,107.47,109,1849],
+      [108.93,109.35,107.73,108.05,1341],
+      [107.99,108.18,107.1,107.78,1385],
+      [107.82,108.58,105.92,106.56,1423],
+      [106.58,107.24,105.19,105.5,1757],
+      [105.41,107.17,105.09,106.52,1545],
+      [106.63,108.29,106.37,107.86,1331],
+      [107.74,110.02,107.04,109.45,1686],
+      [109.39,111.15,109.21,111,1979],
+      [111.07,111.2,109.63,110.19,1341],
+      [110.34,110.6,109.02,109.27,1504],
+      [109.13,110.07,108.41,109.48,1196],
+      [109.62,110.39,108.17,108.5,1676],
+      [108.61,109.7,108.16,109.47,1513],
+      [109.63,111.9,109.2,111.17,1388],
+      [111.28,112.87,110.56,112.5,1349],
+      [112.59,113.22,111.61,112.25,942],
+      [112.23,112.97,110.56,111,1331]
+    ],
+    future: [
+      [110.88,111.19,109.43,109.79,1679],
+      [109.93,110.58,107.9,108.49,1336],
+      [108.42,108.63,107.53,107.72,1450],
+      [107.84,108.18,105.8,106,1580],
+      [106.15,106.85,104.17,104.95,1431],
+      [104.96,105.45,103.65,104.21,1125],
+      [104.28,104.59,103.36,103.71,1237],
+      [103.71,104.36,102.37,103,1402],
+      [102.99,104.27,102.71,104.16,1725],
+      [104.27,104.99,103.95,104.71,1265],
+      [104.64,106.26,104.5,105.72,1477],
+      [105.81,106.61,105.05,106.5,1281],
+      [106.47,106.71,104.33,104.76,1894],
+      [104.84,105.42,103.18,103.73,1484],
+      [103.74,103.84,101.38,102.05,1961],
+      [102.13,102.53,99.61,100,2099],
+      [99.87,100.51,98.59,99.05,1374],
+      [99.14,99.87,97.38,98.03,1279],
+      [98.09,98.27,96.42,97.15,1441],
+      [97.14,97.79,95.84,96,1344]
+    ]
+  }
+];
+
+/* ---------- Moves / tools / items ----------
+ * call: 'up' | 'down' -> fixed directional prediction
+ *       'trend'       -> predicts the recent momentum continues
+ *       'reversal'    -> predicts the recent momentum flips
+ * super: pattern ids where an aligned hit is "super effective" (x1.5)
+ */
+const MOVES = [
+  { name: 'NECKLINE BREAK', call: 'down',     power: 20, pp: 5, super: ['hs', 'wedge'], blurb: 'Bet the level cracks.' },
+  { name: 'FLAG BREAKOUT',  call: 'up',       power: 20, pp: 5, super: ['flag', 'dbl'], blurb: 'Bet the range breaks up.' },
+  { name: 'VOLUME CONFIRM', call: 'trend',    power: 18, pp: 8, super: [],              blurb: 'Bet recent momentum continues.' },
+  { name: 'RSI DIVERGENCE', call: 'reversal', power: 18, pp: 6, super: [],              blurb: 'Bet recent momentum flips.' },
+];
+const FOCUS_MAX = 10;
+
+/* ---------- Small helpers ---------- */
+const txt = (scene, x, y, s, size = 16, color = CSS.lightest) =>
+  scene.add.text(x, y, s, { fontFamily: FONT, fontSize: size + 'px', fontStyle: 'bold', color });
+const toCandle = a => ({ o: a[0], h: a[1], l: a[2], c: a[3], v: a[4] });
+const flip = d => (d === 'up' ? 'down' : 'up');
+const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+
+/** Classic GB double-bordered window. */
+function drawBox(g, x, y, w, h) {
+  g.fillStyle(C.lightest); g.fillRect(x, y, w, h);
+  g.fillStyle(C.darkest);  g.fillRect(x + 3, y + 3, w - 6, h - 6);
+  g.fillStyle(C.light);    g.fillRect(x + 5, y + 5, w - 10, h - 10);
+  g.fillStyle(C.darkest);  g.fillRect(x + 6, y + 6, w - 12, h - 12);
+}
+
+/** Chunky HP bar. */
+function drawHpBar(g, x, y, w, frac) {
+  g.clear();
+  g.fillStyle(C.lightest); g.fillRect(x - 2, y - 2, w + 4, 10);
+  g.fillStyle(C.darkest);  g.fillRect(x - 1, y - 1, w + 2, 8);
+  g.fillStyle(frac > 0.25 ? C.lightest : C.light);
+  g.fillRect(x, y, Math.max(0, Math.round(w * frac)), 6);
+}
+
+/* ---------- Tiny square-wave SFX via WebAudio (lazy, after first input) ---------- */
+const SFX = {
+  ctx: null,
+  play(type) {
+    try {
+      if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = this.ctx, o = ctx.createOscillator(), g = ctx.createGain();
+      const presets = {
+        blip:  [880, 880, 0.05], ok: [660, 990, 0.08], hit: [220, 60, 0.25],
+        miss:  [300, 150, 0.2],  heal: [440, 880, 0.2], candle: [520, 560, 0.04], win: [523, 1046, 0.5],
+      };
+      const [f0, f1, dur] = presets[type] || presets.blip;
+      o.type = 'square'; o.frequency.setValueAtTime(f0, ctx.currentTime);
+      o.frequency.exponentialRampToValueAtTime(f1, ctx.currentTime + dur);
+      g.gain.setValueAtTime(0.05, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
+      o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + dur);
+    } catch (e) { /* audio is optional */ }
+  },
+};
+
+/* ---------- Input mapping shared by all scenes ---------- */
+const KEYMAP = {
+  ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+  KeyW: 'up', KeyS: 'down', KeyA: 'left', KeyD: 'right',
+  KeyZ: 'ok', Enter: 'ok', Space: 'ok', KeyX: 'back', Escape: 'back', Backspace: 'back',
+};
+function bindKeys(scene, handler) {
+  scene.input.keyboard.on('keydown', e => {
+    const a = KEYMAP[e.code];
+    if (a) { e.preventDefault && e.preventDefault(); handler(a); }
+  });
+}
+
+/* =====================================================================
+ * PLAYER SPRITE — "UNC DUDE": cap, stubble beard, jacket, backpack,
+ * holding a tablet with a chart on it. 20x23 pixel map, one char per pixel:
+ *   . transparent   0 darkest   1 dark   2 light   3 lightest
+ * ===================================================================== */
+const UNC_ROWS = [
+  '......2222..........',   // cap crown
+  '.....222222.........',
+  '....12222222........',
+  '....122222222222....',   // cap + brim facing right
+  '....1133333.........',   // hair + face
+  '....1133303.........',   // eye
+  '....11333333........',   // nose
+  '....11311113........',   // mustache
+  '.....111111.........',   // unc beard
+  '......333...........',   // neck
+  '.1112222222.........',   // backpack + jacket
+  '.1112222222..333333.',   // tablet frame top
+  '.1212222222..300033.',   // strap / tablet screen (chart line)
+  '.121222222222300303.',   // arm holding tablet
+  '.1212222222..303003.',
+  '.1112222222..330003.',
+  '.1112222222..333333.',
+  '....1111111.........',   // pants
+  '....111.111.........',
+  '....111.111.........',
+  '....111.111.........',
+  '....111.111.........',
+  '...2222.2222........',   // shoes
+];
+// Attack pose: arm pushed out and tablet screen "lit up" (inverted)
+const UNC_ATK_ROWS = UNC_ROWS.map((row, y) => {
+  let r = row.split('');
+  if (y >= 11 && y <= 16) { r.splice(11, 0, '.'); r = r.slice(0, 20); }   // tablet shoved forward 1px
+  if (y === 13) { r[11] = '2'; r[12] = '2'; r[13] = '2'; }               // longer arm
+  if (y >= 12 && y <= 15) for (let x = 15; x <= 18; x++) r[x] = r[x] === '0' ? '3' : r[x] === '3' ? '0' : r[x];
+  return r.join('');
+});
+
+function makePixelTexture(scene, key, rows, scale) {
+  const map = { '0': C.darkest, '1': C.dark, '2': C.light, '3': C.lightest };
+  const g = scene.make.graphics({ x: 0, y: 0, add: false });
+  rows.forEach((row, y) => [...row].forEach((ch, x) => {
+    if (map[ch] !== undefined) { g.fillStyle(map[ch]); g.fillRect(x * scale, y * scale, scale, scale); }
+  }));
+  g.generateTexture(key, rows[0].length * scale, rows.length * scale);
+  g.destroy();
+}
+
+/* =====================================================================
+ * CANDLE CHART — the "enemy". Draws OHLCV candles with Phaser Graphics
+ * and can play forward by animating the next historical candles in.
+ * ===================================================================== */
+class CandleChart {
+  constructor(scene, x, y, w, h, pattern, opts = {}) {
+    this.scene = scene; this.x = x; this.y = y; this.w = w; this.h = h;
+    this.pattern = pattern;
+    this.opts = Object.assign({ panel: true, volume: true, label: true, slot: 8 }, opts);
+    this.slot = this.opts.slot;                          // px per candle (5px body + gap)
+    this.visible = Math.floor((w - 12) / this.slot);     // candles that fit; older ones scroll off
+    this.candles = pattern.candles.map(toCandle);        // revealed so far
+    this.future = pattern.future.map(toCandle);          // hidden continuation
+    this.cursor = 0;                                     // next future candle index
+    this.nowIndex = this.candles.length;                 // divider: where the "prediction" starts
+    this.live = null; this.pendingTarget = null;         // candle currently animating in
+    this.showLine = !!this.opts.showLine;
+
+    this.innerX = x + 6;
+    const volH = this.opts.volume ? Math.floor(h * 0.15) : 0;
+    this.priceTop = y + (this.opts.label ? 24 : 8);
+    this.priceBottom = y + h - 8 - volH - (volH ? 6 : 0);
+    this.volTop = this.priceBottom + 6; this.volBottom = y + h - 8;
+
+    this.g = scene.add.graphics();
+    this.label = this.opts.label ? txt(scene, x + 8, y + 6, '', 12, CSS.light) : null;
+    this.redraw();
+  }
+
+  get objects() { return [this.g, this.label].filter(Boolean); }
+  remaining() { return this.future.length - this.cursor; }
+  lastClose() { return this.candles[this.candles.length - 1].c; }
+  count() { return this.candles.length + (this.live ? 1 : 0); }
+  windowStart() { return Math.max(0, this.count() - this.visible); }
+  xOfIndex(i) { return this.innerX + (i - this.windowStart()) * this.slot; }
+
+  /** Recent momentum: close now vs. 4 candles ago. */
+  momentum() {
+    const n = this.candles.length;
+    return this.candles[n - 1].c >= this.candles[n - 5].c ? 'up' : 'down';
+  }
+
+  /** Price range of the visible window (incl. the full target of the animating candle so the scale doesn't jitter). */
+  computeRange() {
+    let lo = Infinity, hi = -Infinity;
+    for (let i = this.windowStart(); i < this.candles.length; i++) { lo = Math.min(lo, this.candles[i].l); hi = Math.max(hi, this.candles[i].h); }
+    if (this.pendingTarget) { lo = Math.min(lo, this.pendingTarget.l); hi = Math.max(hi, this.pendingTarget.h); }
+    const pad = (hi - lo) * 0.06 || 1;
+    this.lo = lo - pad; this.hi = hi + pad;
+  }
+  yOf(p) { return Math.round(this.priceBottom - (p - this.lo) / (this.hi - this.lo) * (this.priceBottom - this.priceTop)); }
+
+  /* ---- CANDLE DRAWING ----
+   * Bull candle (close >= open): solid lightest body.
+   * Bear candle: hollow body (light outline, darkest fill).
+   * Wick: 1px vertical line from high to low, drawn first so the body covers it.
+   */
+  drawCandle(g, c, i) {
+    const sx = this.xOfIndex(i), cx = sx + 3;
+    const bull = c.c >= c.o;
+    const yH = this.yOf(c.h), yL = this.yOf(c.l), yO = this.yOf(c.o), yC = this.yOf(c.c);
+    const top = Math.min(yO, yC), bh = Math.max(1, Math.abs(yO - yC));
+    g.fillStyle(bull ? C.lightest : C.light);
+    g.fillRect(cx, yH, 1, Math.max(1, yL - yH));          // wick
+    if (bull) {
+      g.fillStyle(C.lightest); g.fillRect(sx + 1, top, 5, bh);
+    } else {
+      g.fillStyle(C.light); g.fillRect(sx + 1, top, 5, bh);
+      if (bh > 2) { g.fillStyle(C.darkest); g.fillRect(sx + 2, top + 1, 3, bh - 2); }
+    }
+  }
+
+  redraw() {
+    const g = this.g; g.clear();
+    this.computeRange();
+    const { x, y, w, h } = this;
+    if (this.opts.panel) {
+      g.fillStyle(C.dark); g.fillRect(x, y, w, h);
+      g.fillStyle(C.darkest); g.fillRect(x + 2, y + 2, w - 4, h - 4);
+    }
+    // dotted grid
+    g.fillStyle(C.dark);
+    for (let k = 1; k < 4; k++) {
+      const gy = Math.round(this.priceTop + (this.priceBottom - this.priceTop) * k / 4);
+      for (let gx = this.innerX; gx < x + w - 6; gx += 4) g.fillRect(gx, gy, 1, 1);
+    }
+    const s = this.windowStart();
+    // "NOW" divider where the pattern ended and the future began
+    if (this.nowIndex >= s && this.nowIndex < this.count() + 1) {
+      const nx = this.xOfIndex(this.nowIndex) - 1;
+      for (let yy = this.priceTop; yy < this.volBottom; yy += 3) g.fillRect(nx, yy, 1, 2);
+    }
+    // volume bars
+    if (this.opts.volume) {
+      let maxV = 1;
+      const all = this.candles.slice(s).concat(this.live ? [this.live] : []);
+      all.forEach(c => { maxV = Math.max(maxV, c.v); });
+      all.forEach((c, k) => {
+        const vh = Math.max(1, Math.round((c.v / maxV) * (this.volBottom - this.volTop)));
+        g.fillStyle(c.c >= c.o ? C.light : C.dark);
+        g.fillRect(this.xOfIndex(s + k) + 1, this.volBottom - vh, 5, vh);
+      });
+    }
+    // candles
+    for (let i = s; i < this.candles.length; i++) this.drawCandle(g, this.candles[i], i);
+    if (this.live) this.drawCandle(g, this.live, this.candles.length);
+    // key level / trendline (TA TOOLS > TRENDLINE)
+    if (this.showLine && this.pattern.line) this.drawLevel(g);
+    if (this.label) {
+      const last = this.live ? this.live.c : this.lastClose();
+      this.label.setText(`${this.pattern.ticker} 1D  ${last.toFixed(2)}`);
+    }
+  }
+
+  drawLevel(g) {
+    const { a, b } = this.pattern.line;
+    const slope = (b[1] - a[1]) / (b[0] - a[0]);
+    const s = this.windowStart();
+    const startIdx = Math.max(a[0], s);
+    g.fillStyle(C.lightest);
+    for (let px = this.xOfIndex(startIdx) + 3; px < this.x + this.w - 6; px++) {
+      if (((px >> 2) & 1) === 1) continue;                 // dashed
+      const idx = s + (px - this.innerX - 3) / this.slot;
+      const py = this.yOf(a[1] + slope * (idx - a[0]));
+      if (py >= this.priceTop && py <= this.priceBottom) g.fillRect(px, py, 1, 2);
+    }
+  }
+
+  /* ---- ANIMATE FORWARD ----
+   * Pops the next historical candle off `future` and "grows" it from its
+   * open to its real high/low/close over `duration` ms, then commits it.
+   */
+  appendNext(duration = 320) {
+    if (this.cursor >= this.future.length) return Promise.resolve(null);
+    const target = this.future[this.cursor++];
+    const o = target.o;
+    this.pendingTarget = target;
+    this.live = { o, h: o, l: o, c: o, v: 0 };
+    return new Promise(resolve => {
+      const t = { p: 0 };
+      this.scene.tweens.add({
+        targets: t, p: 1, duration, ease: 'Sine.easeOut',
+        onUpdate: () => {
+          const L = this.live;
+          L.h = o + (target.h - o) * t.p; L.l = o + (target.l - o) * t.p;
+          L.c = o + (target.c - o) * t.p; L.v = target.v * t.p;
+          this.redraw();
+        },
+        onComplete: () => {
+          this.live = null; this.pendingTarget = null;
+          this.candles.push(target); this.redraw();
+          resolve(target);
+        },
+      });
+    });
+  }
+
+  /** Plays forward up to n candles sequentially; resolves with the revealed chunk. */
+  async playForward(n, gap = 140) {
+    const chunk = [];
+    for (let k = 0; k < n; k++) {
+      const c = await this.appendNext();
+      if (!c) break;
+      SFX.play('candle');
+      chunk.push(c);
+      await new Promise(r => this.scene.time.delayedCall(gap, r));
+    }
+    return chunk;
+  }
+
+  flash() {
+    return new Promise(r => this.scene.tweens.add({ targets: this.objects, alpha: 0.15, duration: 70, yoyo: true, repeat: 3, onComplete: () => { this.objects.forEach(o => o.setAlpha(1)); r(); } }));
+  }
+  wobble() {
+    return new Promise(r => this.scene.tweens.add({ targets: this.objects, x: '-=8', duration: 50, yoyo: true, repeat: 3, onComplete: () => { this.g.x = 0; if (this.label) this.label.x = this.x + 8; r(); } }));
+  }
+  destroy() { this.objects.forEach(o => o.destroy()); }
+}
+
+/* =====================================================================
+ * DAMAGE RESOLUTION (pure function)
+ * Compare the attack's predicted direction with what the revealed chunk
+ * actually did (last close of chunk vs. close before the chunk).
+ *   aligned  -> power + 2.5 per % moved (capped at 6%), x1.5 super effective,
+ *               x1.3 if a TRENDLINE was drawn first
+ *   wrong but choppy (<1.5% move) -> glancing 20% of power
+ *   wrong and decisive            -> 0 damage, enemy gets a counter bonus
+ * ===================================================================== */
+function resolveAttack(move, beforeClose, momentumDir, chunk, patternId, trendBuff) {
+  const end = chunk[chunk.length - 1].c;
+  const pct = (end - beforeClose) / beforeClose * 100;
+  const actual = pct >= 0 ? 'up' : 'down';
+  const predicted = move.call === 'trend' ? momentumDir : move.call === 'reversal' ? flip(momentumDir) : move.call;
+  const aligned = predicted === actual;
+  const superEff = aligned && move.super.includes(patternId);
+  let dmg = 0;
+  if (aligned) dmg = (move.power + Math.min(Math.abs(pct), 6) * 2.5) * (superEff ? 1.5 : 1) * (trendBuff ? 1.3 : 1);
+  else if (Math.abs(pct) < 1.5) dmg = move.power * 0.2;
+  dmg = Math.round(dmg);
+  return { pct, actual, predicted, aligned, superEff, dmg, glancing: !aligned && dmg > 0 };
+}
+
+/* =====================================================================
+ * SCENES
+ * ===================================================================== */
+class BootScene extends Phaser.Scene {
+  constructor() { super('Boot'); }
+  create() {
+    makePixelTexture(this, 'unc', UNC_ROWS, 5);
+    makePixelTexture(this, 'unc_atk', UNC_ATK_ROWS, 5);
+    const g = this.make.graphics({ add: false });
+    g.fillStyle(C.lightest); g.fillRect(0, 0, 6, 6); g.generateTexture('px', 6, 6); g.clear();
+    g.fillStyle(C.light); g.fillRect(0, 0, 4, 4); g.generateTexture('px2', 4, 4); g.destroy();
+    this.registry.set('cleared', {});
+    this.scene.start('Title');
+  }
+}
+
+/* ---------- Title ---------- */
+class TitleScene extends Phaser.Scene {
+  constructor() { super('Title'); }
+  create() {
+    // background: a faint chart that keeps playing forward
+    this.bgIdx = 0;
+    const makeBg = () => {
+      if (this.bg) this.bg.destroy();
+      this.bg = new CandleChart(this, 10, 20, 460, 260, PATTERNS[this.bgIdx % PATTERNS.length], { panel: false, label: false });
+      this.bg.objects.forEach(o => o.setAlpha(0.3).setDepth(-1));
+      this.bgIdx++;
+    };
+    makeBg();
+    this.time.addEvent({ delay: 450, loop: true, callback: () => { if (this.bg.remaining() > 0) this.bg.appendNext(250); else makeBg(); } });
+
+    txt(this, W / 2 + 4, 94, 'CHART QUEST', 52, CSS.dark).setOrigin(0.5);
+    txt(this, W / 2, 90, 'CHART QUEST', 52, CSS.lightest).setOrigin(0.5);
+    txt(this, W / 2, 140, 'A TECHNICAL ANALYSIS RPG', 15, CSS.light).setOrigin(0.5);
+    const cleared = Object.keys(this.registry.get('cleared')).length;
+    if (cleared >= PATTERNS.length) txt(this, W / 2, 162, '* MARKET MASTER *', 14, CSS.lightest).setOrigin(0.5);
+
+    const g = this.add.graphics(); g.fillStyle(C.dark); g.fillEllipse(W / 2, 332, 120, 18);
+    this.add.image(W / 2, 330, 'unc').setOrigin(0.5, 1);
+
+    const start = txt(this, W / 2, 362, 'PRESS START', 22, CSS.lightest).setOrigin(0.5);
+    this.tweens.add({ targets: start, alpha: 0, duration: 450, yoyo: true, repeat: -1, hold: 300 });
+    txt(this, W / 2, 404, 'ARROWS: MOVE   Z/ENTER: A   X/ESC: B   (or click)', 11, CSS.light).setOrigin(0.5);
+
+    let going = false;
+    const go = () => {
+      if (going) return; going = true; SFX.play('ok');
+      this.cameras.main.flash(200, 155, 188, 15);
+      this.time.delayedCall(220, () => this.scene.start('Select'));
+    };
+    bindKeys(this, a => { if (a === 'ok') go(); });
+    this.input.on('pointerdown', go);
+  }
+}
+
+/* ---------- Chart select (minimal "overworld") ---------- */
+class SelectScene extends Phaser.Scene {
+  constructor() { super('Select'); }
+  create() {
+    this.idx = this.registry.get('lastPick') || 0;
+    txt(this, W / 2, 26, 'CHOOSE YOUR CHART', 22).setOrigin(0.5);
+    const cleared = this.registry.get('cleared');
+    this.items = PATTERNS.map((p, i) => {
+      const t = txt(this, 44, 76 + i * 48, p.name, 15);
+      txt(this, 44, 94 + i * 48, `${p.ticker}  ${p.bias === 'up' ? 'BULLISH' : 'BEARISH'}${cleared[p.id] ? '  CLEARED' : ''}`, 11, CSS.light);
+      t.setInteractive({ useHandCursor: true });
+      t.on('pointerover', () => this.setIdx(i));
+      t.on('pointerdown', () => { this.setIdx(i); this.choose(); });
+      return t;
+    });
+    this.cursor = txt(this, 22, 0, '▶', 15);
+    const g = this.add.graphics(); drawBox(g, 6, 300, 468, 126);
+    this.desc = txt(this, 22, 316, '', 14).setWordWrapWidth(436);
+    this.hint = txt(this, 22, 396, 'Z: BATTLE   X: BACK TO TITLE', 12, CSS.light);
+    bindKeys(this, a => {
+      if (a === 'up') this.setIdx((this.idx + PATTERNS.length - 1) % PATTERNS.length);
+      if (a === 'down') this.setIdx((this.idx + 1) % PATTERNS.length);
+      if (a === 'ok') this.choose();
+      if (a === 'back') this.scene.start('Title');
+    });
+    this.setIdx(this.idx, true);
+  }
+  setIdx(i, silent) {
+    if (i === this.idx && !silent && this.preview) return;
+    this.idx = i; if (!silent) SFX.play('blip');
+    this.cursor.y = this.items[i].y;
+    if (this.preview) this.preview.destroy();
+    this.preview = new CandleChart(this, 244, 62, 228, 226, PATTERNS[i], { showLine: true });
+    const p = PATTERNS[i];
+    this.desc.setText(`${p.name}  Lv.${p.lv}\n${p.desc}`);
+  }
+  choose() {
+    SFX.play('ok'); this.registry.set('lastPick', this.idx);
+    this.cameras.main.flash(150, 155, 188, 15);
+    this.time.delayedCall(160, () => this.scene.start('Battle', { index: this.idx }));
+  }
+}
+
+/* ---------- Battle ---------- */
+class BattleScene extends Phaser.Scene {
+  constructor() { super('Battle'); }
+  init(data) {
+    this.pattern = PATTERNS[data.index || 0];
+    this.player = { hp: 100, maxHp: 100, focus: FOCUS_MAX, pp: MOVES.map(m => m.pp) };
+    this.items = { COFFEE: 3, 'STOP LOSS': 2, 'ENERGY DRINK': 1 };
+    this.enemy = { hp: this.pattern.hp, maxHp: this.pattern.hp };
+    this.trendBuff = false; this.stopLoss = false;
+    this.stats = { turns: 0, hits: 0, misses: 0, dealt: 0, pnl: 0 };
+    this.state = 'busy'; this.skipFn = null;
+  }
+
+  create() {
+    const P = this.pattern;
+    /* --- enemy window (top right) + chart --- */
+    const eg = this.add.graphics(); drawBox(eg, 196, 4, 278, 50);
+    txt(this, 210, 13, P.name, 14);
+    txt(this, 400, 13, `Lv.${P.lv}`, 12, CSS.light);
+    txt(this, 210, 32, 'HP', 11, CSS.light);
+    this.enemyHpG = this.add.graphics();
+    this.enemyHpShown = this.enemy.hp; this.redrawEnemyHp();
+    this.chart = new CandleChart(this, 198, 58, 274, 236, P);
+
+    /* --- player window (top left) + sprite --- */
+    const pg = this.add.graphics(); drawBox(pg, 6, 4, 186, 68);
+    txt(this, 20, 13, 'UNC DUDE', 14);
+    txt(this, 130, 13, 'Lv.42', 12, CSS.light);
+    txt(this, 20, 32, 'HP', 11, CSS.light);
+    this.playerHpG = this.add.graphics();
+    this.playerHpText = txt(this, 20, 48, '', 11, CSS.lightest);
+    this.playerHpShown = this.player.hp; this.redrawPlayerHp();
+
+    const plat = this.add.graphics(); plat.fillStyle(C.dark); plat.fillEllipse(92, 290, 140, 16);
+    this.sprite = this.add.image(92, 288, 'unc').setOrigin(0.5, 1);
+    this.tweens.add({ targets: this.sprite, y: 286, duration: 500, yoyo: true, repeat: -1 }); // idle bob
+
+    /* --- bottom UI --- */
+    const bg = this.add.graphics(); drawBox(bg, 6, 300, 468, 128);
+    this.msg = txt(this, 22, 316, '', 17).setWordWrapWidth(436).setLineSpacing(6);
+    this.menuG = this.add.graphics();
+    this.menuTexts = [];
+    this.infoText = null;
+
+    bindKeys(this, a => this.onAction(a));
+    this.input.on('pointerdown', (p, over) => { if (this.state === 'busy' && over.length === 0 && this.skipFn) this.skipFn(); });
+
+    this.intro();
+  }
+
+  /* ---------- HUD ---------- */
+  redrawEnemyHp() { drawHpBar(this.enemyHpG, 240, 35, 220, this.enemyHpShown / this.enemy.maxHp); }
+  redrawPlayerHp() {
+    drawHpBar(this.playerHpG, 48, 35, 132, this.playerHpShown / this.player.maxHp);
+    this.playerHpText.setText(`${Math.ceil(this.playerHpShown)}/${this.player.maxHp}  FOCUS ${this.player.focus}`);
+  }
+  tweenHp(who) {
+    const key = who === 'enemy' ? 'enemyHpShown' : 'playerHpShown';
+    const target = who === 'enemy' ? this.enemy.hp : this.player.hp;
+    return new Promise(r => this.tweens.add({
+      targets: this, [key]: target, duration: 500,
+      onUpdate: () => (who === 'enemy' ? this.redrawEnemyHp() : this.redrawPlayerHp()),
+      onComplete: () => { (who === 'enemy' ? this.redrawEnemyHp() : this.redrawPlayerHp()); r(); },
+    }));
+  }
+
+  /* ---------- Narration (typewriter, Z/click to skip) ---------- */
+  say(text, hold = 650) {
+    this.clearMenu();
+    this.msg.setWordWrapWidth(436);
+    return new Promise(resolve => {
+      let i = 0, finished = false, ended = false, typeEv = null;
+      const end = () => { if (ended) return; ended = true; this.skipFn = null; resolve(); };
+      const finishTyping = () => {
+        if (finished) return; finished = true;
+        if (typeEv) typeEv.remove(false);
+        this.msg.setText(text);
+        const holdEv = this.time.delayedCall(hold, end);
+        this.skipFn = () => { holdEv.remove(false); end(); };
+      };
+      this.msg.setText('');
+      this.skipFn = finishTyping;
+      typeEv = this.time.addEvent({ delay: 16, loop: true, callback: () => {
+        i += 1; this.msg.setText(text.slice(0, i)); if (i >= text.length) finishTyping();
+      } });
+    });
+  }
+  wait(ms) { return new Promise(r => this.time.delayedCall(ms, r)); }
+
+  /* ---------- Menus ---------- */
+  clearMenu() {
+    this.menuG.clear();
+    this.menuTexts.forEach(t => t.destroy()); this.menuTexts = [];
+    if (this.infoText) { this.infoText.destroy(); this.infoText = null; }
+    if (this.cursorText) { this.cursorText.destroy(); this.cursorText = null; }
+  }
+
+  openMain() {
+    this.state = 'main'; this.clearMenu();
+    this.msg.setWordWrapWidth(220).setText('What will\nUNC DUDE do?');
+    drawBox(this.menuG, 262, 300, 212, 128);
+    const labels = ['FIGHT', 'TA TOOLS', 'ITEMS', 'RUN'];
+    this.options = labels.map((l, i) => ({ label: l }));
+    this.layoutOptions([[296, 334], [380, 334], [296, 380], [380, 380]], 16);
+    this.setCursor(this.mainIdx || 0);
+  }
+
+  /** Generic 2x2 list (fight / tools / items). Each option: {label, info(), enabled(), act()} */
+  openList(kind, options) {
+    this.state = 'list'; this.listKind = kind; this.clearMenu();
+    this.msg.setText('');
+    drawBox(this.menuG, 326, 300, 148, 128);
+    this.options = options;
+    // 2x2 grid: two columns x two rows (each option has a sub-line underneath)
+    this.layoutOptions([[34, 326], [182, 326], [34, 372], [182, 372]], 13);
+    this.infoText = txt(this, 340, 314, '', 12).setWordWrapWidth(124).setLineSpacing(4);
+    this.setCursor(0);
+  }
+
+  layoutOptions(positions, size) {
+    this.optPos = positions;
+    this.options.forEach((o, i) => {
+      const [x, y] = positions[i];
+      const disabled = o.enabled && !o.enabled();
+      const t = txt(this, x, y, o.label, size, disabled ? CSS.dark : CSS.lightest);
+      if (o.sub) this.menuTexts.push(txt(this, x, y + 18, o.sub(), 11, CSS.light));
+      t.setInteractive({ useHandCursor: true });
+      t.on('pointerover', () => { if (this.state !== 'busy') this.setCursor(i); });
+      t.on('pointerdown', () => { if (this.state !== 'busy') { this.setCursor(i); this.confirm(); } });
+      this.menuTexts.push(t);
+    });
+    this.cursorText = txt(this, 0, 0, '▶', size);
+  }
+
+  setCursor(i) {
+    if (this.cursorIdx !== i && this.cursorText && this.cursorText.visible) SFX.play('blip');
+    this.cursorIdx = i;
+    const [x, y] = this.optPos[i];
+    this.cursorText.setPosition(x - 18, y);
+    if (this.state === 'main') this.mainIdx = i;
+    if (this.infoText && this.options[i].info) this.infoText.setText(this.options[i].info());
+  }
+
+  onAction(a) {
+    if (this.state === 'busy') { if (a === 'ok' && this.skipFn) this.skipFn(); return; }
+    if (this.state === 'done') return;
+    const n = this.options.length, i = this.cursorIdx;
+    if (n === 4) {   // 2x2 grid navigation
+      const col = i % 2, row = Math.floor(i / 2);
+      if (a === 'left' || a === 'right') this.setCursor(row * 2 + (1 - col));
+      if (a === 'up' || a === 'down') this.setCursor((1 - row) * 2 + col);
+    } else if (n > 1 && (a === 'up' || a === 'down' || a === 'left' || a === 'right')) {
+      this.setCursor((i + 1) % n);
+    }
+    if (a === 'ok') this.confirm();
+    if (a === 'back' && this.state === 'list') { SFX.play('blip'); this.openMain(); }
+  }
+
+  confirm() {
+    const i = this.cursorIdx;
+    if (this.state === 'main') {
+      SFX.play('ok');
+      [() => this.openFight(), () => this.openTools(), () => this.openItems(), () => this.run()][i]();
+      return;
+    }
+    const o = this.options[i];
+    if (o.enabled && !o.enabled()) { SFX.play('miss'); return; }
+    SFX.play('ok');
+    o.act();
+  }
+
+  openFight() {
+    this.openList('fight', MOVES.map((m, k) => ({
+      label: m.name,
+      sub: () => `PP ${this.player.pp[k]}/${m.pp}`,
+      enabled: () => this.player.pp[k] > 0,
+      info: () => `PP ${this.player.pp[k]}/${m.pp}\nCALL: ${m.call.toUpperCase()}\n${m.blurb}`,
+      act: () => this.playerAttack(k),
+    })));
+  }
+
+  openTools() {
+    const P = this.pattern, line = P.line;
+    this.openList('tools', [
+      { label: 'TRENDLINE', sub: () => 'FOCUS 3', enabled: () => this.player.focus >= 3 && !this.trendBuff,
+        info: () => `Draw the ${line.label}. Next aligned hit x1.3.`,
+        act: () => this.useTool(3, async () => {
+          this.chart.showLine = true; this.chart.redraw(); this.trendBuff = true;
+          await this.say(`UNC DUDE drew the ${line.label} near ${line.b[1].toFixed(2)}!`);
+          await this.say('Next aligned hit gets a x1.3 bonus.');
+        }) },
+      { label: 'FIB SCAN', sub: () => 'FOCUS 4', enabled: () => this.player.focus >= 4,
+        info: () => 'Peek at the odds for the next candles.',
+        act: () => this.useTool(4, async () => {
+          const next = this.chart.future.slice(this.chart.cursor, this.chart.cursor + CHUNK);
+          if (!next.length) return this.say('Nothing left to scan...');
+          const dir = next[next.length - 1].c >= this.chart.lastClose() ? 'UP' : 'DOWN';
+          await this.say(`Fib levels line up... the next move leans ${dir}.`);
+        }) },
+      { label: 'RSI CHECK', sub: () => 'FOCUS 1', enabled: () => this.player.focus >= 1,
+        info: () => 'Read RSI(14) and recent momentum.',
+        act: () => this.useTool(1, async () => {
+          const r = rsi(this.chart.candles, 14);
+          const zone = r > 70 ? 'OVERBOUGHT' : r < 30 ? 'OVERSOLD' : 'NEUTRAL';
+          await this.say(`RSI(14) = ${r.toFixed(1)} (${zone}). Momentum is ${this.chart.momentum().toUpperCase()}.`);
+        }) },
+    ]);
+  }
+
+  openItems() {
+    const it = this.items;
+    this.openList('items', [
+      { label: 'COFFEE', sub: () => `x${it.COFFEE}`, enabled: () => it.COFFEE > 0, info: () => 'Restores 30 HP.',
+        act: () => this.useItem(async () => {
+          it.COFFEE--; this.player.hp = Math.min(this.player.maxHp, this.player.hp + 30);
+          SFX.play('heal'); await this.say('UNC DUDE sipped a COFFEE! Restored 30 HP.'); await this.tweenHp('player');
+        }) },
+      { label: 'STOP LOSS', sub: () => `x${it['STOP LOSS']}`, enabled: () => it['STOP LOSS'] > 0 && !this.stopLoss, info: () => 'Halves the next enemy hit.',
+        act: () => this.useItem(async () => {
+          it['STOP LOSS']--; this.stopLoss = true; await this.say('UNC DUDE set a STOP LOSS! Next hit is halved.');
+        }) },
+      { label: 'ENERGY DRINK', sub: () => `x${it['ENERGY DRINK']}`, enabled: () => it['ENERGY DRINK'] > 0, info: () => 'Restores 5 FOCUS and 2 PP each.',
+        act: () => this.useItem(async () => {
+          it['ENERGY DRINK']--; this.player.focus = Math.min(FOCUS_MAX, this.player.focus + 5);
+          this.player.pp = this.player.pp.map((v, k) => Math.min(MOVES[k].pp, v + 2));
+          SFX.play('heal'); this.redrawPlayerHp(); await this.say('UNC DUDE chugged an ENERGY DRINK! FOCUS and PP restored.');
+        }) },
+    ]);
+  }
+
+  /** TA tools are a free action (they only cost FOCUS). */
+  async useTool(cost, fn) {
+    this.state = 'busy'; this.player.focus -= cost; this.redrawPlayerHp();
+    await fn();
+    this.openMain();
+  }
+  /** Items use up the turn: the enemy acts afterwards (chart does not advance). */
+  async useItem(fn) {
+    this.state = 'busy';
+    await fn();
+    await this.enemyTurn(false);
+    if (this.player.hp > 0) this.openMain();
+  }
+
+  async run() {
+    this.state = 'busy';
+    await this.say('UNC DUDE closed the position and walked away.');
+    this.scene.start('Select');
+  }
+
+  async intro() {
+    const P = this.pattern;
+    this.sprite.x = -60;
+    this.tweens.add({ targets: this.sprite, x: 92, duration: 600, ease: 'Quad.easeOut' });
+    await this.say(`A wild ${P.name} appeared on ${P.ticker}!`);
+    await this.say(`${P.bias === 'up' ? 'BULLISH' : 'BEARISH'} setup. Predict what the next candles do!`);
+    this.openMain();
+  }
+
+  /* =================================================================
+   * TURN SEQUENCE
+   * 1) narration  2) attack animation  3) chart plays forward CHUNK
+   * candles  4) resolve alignment -> damage/fx  5) victory check
+   * 6) enemy turn  7) defeat check  8) back to menu
+   * ================================================================= */
+  async playerAttack(k) {
+    const move = MOVES[k];
+    this.state = 'busy';
+    this.player.pp[k]--;
+    this.stats.turns++;
+
+    if (this.chart.remaining() <= 0) return this.chartExhausted();
+
+    await this.say(`UNC DUDE used ${move.name}!`, 300);
+    await this.attackAnimation();
+
+    // Snapshot state BEFORE the reveal so the call is judged fairly
+    const beforeClose = this.chart.lastClose();
+    const momentumDir = this.chart.momentum();
+
+    this.msg.setText('The chart plays forward...');
+    const chunk = await this.chart.playForward(CHUNK);
+
+    const res = resolveAttack(move, beforeClose, momentumDir, chunk, this.pattern.id, this.trendBuff);
+    const moveTxt = `Called ${res.predicted.toUpperCase()}. Price went ${res.actual.toUpperCase()} ${Math.abs(res.pct).toFixed(1)}%.`;
+
+    if (res.aligned) {
+      this.trendBuff = false;
+      this.stats.hits++; this.stats.pnl += Math.abs(res.pct);
+      await this.say(moveTxt, 400);
+      await this.hitEffects(res.dmg);
+      if (res.superEff) await this.say("It's super effective!", 450);
+      await this.say(`${this.pattern.name} took ${res.dmg} damage!`, 400);
+    } else {
+      this.stats.misses++; this.stats.pnl -= Math.abs(res.pct);
+      SFX.play('miss');
+      await this.say(moveTxt, 400);
+      if (res.glancing) { await this.hitEffects(res.dmg, true); await this.say(`Choppy tape... only ${res.dmg} damage.`); }
+      else await this.say('The market disagreed! No damage.');
+    }
+
+    if (this.enemy.hp <= 0) return this.victory();
+    if (this.chart.remaining() <= 0) return this.chartExhausted();
+
+    await this.enemyTurn(!res.aligned && !res.glancing);
+    if (this.player.hp > 0) this.openMain();
+  }
+
+  /** Player lunge + tablet glow, then pixel projectiles fly into the chart. */
+  async attackAnimation() {
+    const s = this.sprite;
+    s.setTexture('unc_atk');
+    this.tweens.add({ targets: s, x: s.x + 16, duration: 110, yoyo: true });
+    SFX.play('ok');
+    const sx = s.x + 40, sy = s.y - 62, tx = 335, ty = 170;
+    const shots = [];
+    for (let i = 0; i < 6; i++) {
+      const p = this.add.image(sx, sy, 'px').setDepth(10);
+      shots.push(new Promise(r => this.tweens.add({
+        targets: p, x: tx + Phaser.Math.Between(-20, 20), y: ty + Phaser.Math.Between(-30, 30),
+        delay: i * 60, duration: 260, ease: 'Quad.easeIn',
+        onComplete: () => { this.burst(p.x, p.y, 5); p.destroy(); r(); },
+      })));
+    }
+    await Promise.all(shots);
+    s.setTexture('unc');
+  }
+
+  burst(x, y, n) {
+    for (let i = 0; i < n; i++) {
+      const q = this.add.image(x, y, 'px2').setDepth(10);
+      const a = Math.random() * Math.PI * 2, d = 14 + Math.random() * 16;
+      this.tweens.add({ targets: q, x: x + Math.cos(a) * d, y: y + Math.sin(a) * d, alpha: 0, duration: 280, onComplete: () => q.destroy() });
+    }
+  }
+
+  /** Damage FX: HP bar drops, damage number pops, chart flashes, screen shakes. */
+  async hitEffects(dmg, small = false) {
+    SFX.play('hit');
+    this.enemy.hp = Math.max(0, this.enemy.hp - dmg);
+    this.stats.dealt += dmg;
+    this.cameras.main.shake(small ? 120 : 260, small ? 0.004 : 0.012);
+    const num = txt(this, 335, 150, `-${dmg}`, small ? 20 : 30).setOrigin(0.5).setDepth(20).setStroke(CSS.darkest, 6);
+    this.tweens.add({ targets: num, y: 110, alpha: 0, duration: 900, ease: 'Quad.easeOut', onComplete: () => num.destroy() });
+    await Promise.all([this.chart.flash(), this.tweenHp('enemy')]);
+  }
+
+  /** Basic enemy turn: the pattern lashes back (harder if you misread it). */
+  async enemyTurn(counter) {
+    const P = this.pattern;
+    const move = pick(P.enemyMoves);
+    let dmg = Phaser.Math.Between(6, 12) + (counter ? 8 : 0);
+    await this.say(`${P.name} used ${move}!`, 300);
+    await this.chart.wobble();
+    if (this.stopLoss) { dmg = Math.ceil(dmg / 2); this.stopLoss = false; }
+    this.player.hp = Math.max(0, this.player.hp - dmg);
+    SFX.play('hit');
+    this.cameras.main.shake(150, 0.006);
+    this.tweens.add({ targets: this.sprite, alpha: 0.1, duration: 60, yoyo: true, repeat: 3, onComplete: () => this.sprite.setAlpha(1) });
+    await this.tweenHp('player');
+    await this.say(counter ? `Bad read punished! UNC DUDE lost ${dmg} HP.` : `UNC DUDE lost ${dmg} HP.`, 450);
+    if (this.player.hp <= 0) {
+      this.state = 'done';
+      await this.say('UNC DUDE got LIQUIDATED!', 900);
+      this.scene.start('End', { win: false, pattern: P.name, stats: this.stats });
+    }
+  }
+
+  async victory() {
+    this.state = 'done';
+    const P = this.pattern;
+    SFX.play('win');
+    await this.chart.flash();
+    this.tweens.add({ targets: this.chart.objects, alpha: 0.25, duration: 600 });
+    await this.say(`${P.name} was CONFIRMED and CLEARED!`, 900);
+    const cleared = this.registry.get('cleared'); cleared[P.id] = true;
+    this.scene.start('End', { win: true, pattern: P.name, stats: this.stats });
+  }
+
+  async chartExhausted() {
+    this.state = 'done';
+    await this.say('No more candles! The chart fully played out.', 600);
+    const win = this.enemy.hp <= this.player.hp * 0.5;
+    await this.say(win ? 'The pattern is mostly priced in. You take the W!' : 'The pattern escaped before you could finish it...', 900);
+    if (win) this.registry.get('cleared')[this.pattern.id] = true;
+    this.scene.start('End', { win, pattern: this.pattern.name, stats: this.stats });
+  }
+}
+
+/** Wilder-style RSI over closes (used by RSI CHECK). */
+function rsi(candles, period) {
+  const closes = candles.map(c => c.c);
+  let gain = 0, loss = 0;
+  for (let i = 1; i <= period; i++) { const d = closes[i] - closes[i - 1]; if (d > 0) gain += d; else loss -= d; }
+  gain /= period; loss /= period;
+  for (let i = period + 1; i < closes.length; i++) {
+    const d = closes[i] - closes[i - 1];
+    gain = (gain * (period - 1) + Math.max(d, 0)) / period;
+    loss = (loss * (period - 1) + Math.max(-d, 0)) / period;
+  }
+  return loss === 0 ? 100 : 100 - 100 / (1 + gain / loss);
+}
+
+/* ---------- Victory / Game over ---------- */
+class EndScene extends Phaser.Scene {
+  constructor() { super('End'); }
+  init(d) { this.d = d; }
+  create() {
+    const { win, pattern, stats } = this.d;
+    const g = this.add.graphics(); drawBox(g, 30, 40, 420, 352);
+    txt(this, W / 2, 84, win ? 'VICTORY!' : 'GAME OVER', 40).setOrigin(0.5);
+    txt(this, W / 2, 128, win ? `${pattern} defeated` : `${pattern} won this round`, 14, CSS.light).setOrigin(0.5);
+    this.add.image(W / 2, 262, win ? 'unc_atk' : 'unc').setOrigin(0.5, 1).setAngle(win ? 0 : 90);
+    const acc = stats.hits + stats.misses ? Math.round(100 * stats.hits / (stats.hits + stats.misses)) : 0;
+    const pnl = (stats.pnl >= 0 ? '+' : '') + stats.pnl.toFixed(1) + '%';
+    txt(this, 70, 270, `CALLS   ${stats.hits} RIGHT / ${stats.misses} WRONG (${acc}%)`, 13);
+    txt(this, 70, 294, `DAMAGE  ${stats.dealt}`, 13);
+    txt(this, 70, 318, `P&L     ${pnl}   EXP +${win ? 120 + stats.dealt : 10}`, 13);
+    const p = txt(this, W / 2, 360, 'PRESS START', 18).setOrigin(0.5);
+    this.tweens.add({ targets: p, alpha: 0, duration: 450, yoyo: true, repeat: -1 });
+    if (win) SFX.play('win');
+    let going = false;
+    const go = () => { if (going) return; going = true; this.scene.start('Select'); };
+    this.time.delayedCall(400, () => {
+      bindKeys(this, a => { if (a === 'ok') go(); });
+      this.input.on('pointerdown', go);
+    });
+  }
+}
+
+/* ---------- Boot Phaser ---------- */
+const game = new Phaser.Game({
+  type: Phaser.AUTO,
+  parent: 'game',
+  width: W, height: H,
+  backgroundColor: CSS.darkest,
+  pixelArt: true,             // nearest-neighbour scaling, no smoothing
+  roundPixels: true,
+  scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+  scene: [BootScene, TitleScene, SelectScene, BattleScene, EndScene],
+});
+window.__chartQuest = { game, PATTERNS, MOVES, resolveAttack };
+
+</script>
+</body>
+</html>
